@@ -180,10 +180,18 @@ void soft_start() {
 		for(uint8_t i = 0; i < 10; i++) {
 			SET(CC(PORT, PORT_GATE), PIN_GATE_A);
 			SET(CC(PORT, PORT_GATE), PIN_GATE_B);
+
 			delayMicroseconds(t);
+
+			// asm volatile("nop\n\t"
+			// "nop\n\t"
+			// "nop\n\t"
+			// "nop\n\t"
+			// ::);
+
 			CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
 			CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
-			delayMicroseconds(dc_period-t);
+			_delay_ms(10);
 		}
 	}
 	SET(CC(PORT, PORT_GATE), PIN_GATE_A);
