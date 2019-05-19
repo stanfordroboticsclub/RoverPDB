@@ -100,52 +100,25 @@ void init_adc() {
 	SET(ADCSRA, ADIE);
 }
 
-
-void lp_delay_16(uint16_t periods) {
-	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-	WDTCSR = _BV(WDIE) | _BV(WDP1) | _BV(WDP0);	// WDT INT mode, 128ms period
-	uint8_t sleep_stride = 8;
-
-	while(periods > 0) {
-		if (periods < sleep_stride)
-		{
-			WDTCSR = _BV(WDIE);		// WDT INT mode, 16ms period
-			sleep_stride = 1;
-		}
-
-		wdt_reset();
-		wdt_ticks = 0;
-
-		cli();
-		sleep_enable();
-		sei();
-		sleep_cpu();			//go to sleep
-		sleep_disable();	//resume execution after ISR
-
-		if(wdt_ticks >= 1) {
-			periods -= sleep_stride;
-		}
-	}
-}
-
-
+// poll buttons over 50ms. this gets called in response to a pin change interrupt,
+// and gives us more confidence in avoiding spurious estop fires
 void poll_buttons() {
 	uint8_t control_pins = ~(CC(PIN, PORT_CONTROLS));
 
 	uint8_t votes_estop = 0;
 	uint8_t votes_start = 0;
 
-	for(uint8_t i = 0; i < 250; i++) {
+	for(uint8_t i = 0; i < 50; i++) {
 		control_pins = ~(CC(PIN, PORT_CONTROLS));
 		votes_estop += (control_pins & _BV(PIN_ESTOP)) ? 1 : 0;
 		votes_start += (control_pins & _BV(PIN_START)) ? 1 : 0;
-		_delay_us(200);
+		_delay_ms(1);
 	}
 
 	btn_ready = false;
 
-	bool pressed_estop = votes_estop > 240;
-	bool pressed_start = votes_start > 240;
+	bool pressed_estop = votes_estop > 40;
+	bool pressed_start = votes_start > 40;
 
 	if(pressed_estop) {
 		update_state(ESTOP);
