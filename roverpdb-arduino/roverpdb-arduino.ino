@@ -44,17 +44,22 @@ const uint8_t ADC_SCANLIST[] = {PIN_ADC_VBAT_A, PIN_ADC_VBAT_B, PIN_ADC_VSYS};
 uint16_t ADC_RESULTS[sizeof(ADC_SCANLIST)] = {0};
 volatile bool adc_result_ready = false;
 
-#define MV_PER_LSB 	53.71
-#define UVLO 		596 // 32volts / MV_PER_LSB
-#define MAX_DELTA 	6	// do not connect batteries more than 322mV apart
+#define MV_PER_LSB 		53.71
+#define V_UVLO 			465 // 25volts
+#define V_RECOVER 		298 // 16volts 
+#define MAX_DELTA_VBAT 	6	// do not connect batteries more than 322mV apart
+#define OCP_TRIP_DETECT 
 
 enum PDBState {READY, LIVE, ESTOP, FAULT};
 PDBState state_pdb;
 
 
+
 volatile uint32_t wdt_ticks = 0;
 ISR(WDT_vect) {
 	wdt_ticks++;
+	//periodically force poll estop button, in case an interrupt missed
+	btn_ready = true;	
 }
 
 ISR(ADC_vect) {
@@ -169,7 +174,12 @@ void read_adc() {
 }
 
 void print_adc() {
-
+	Serial1.print("VBAT A: ");
+	Serial1.println(ADC_RESULTS[0]);
+	Serial1.print("VBAT B: ");
+	Serial1.println(ADC_RESULTS[1]);
+	Serial1.print("VSYS: ");
+	Serial1.println(ADC_RESULTS[2]);
 }
 
 
@@ -225,11 +235,24 @@ void update_state(PDBState new_state) {
 	state_pdb = new_state;
 }
 
+void reset_power() {
+	update_state(ESTOP);
+	_delay_ms(500);
+	update_state(LIVE);
+}
+
+
 int main() {
 
 	init_io();
 	init_adc();
-	update_state(READY);
+	update_state(ESTOP);
+
+	// test initial voltage to see if we were previously live
+	read_adc();
+	if(ADC_RESULTS[2] > V_RECOVER) {
+		update_state(LIVE);
+	}
 
 	// // flash initialization pattern
 	// const uint8_t blink_seconds = 2;
@@ -238,21 +261,31 @@ int main() {
 	Serial1.begin(115200);
 	Serial1.println("hello");
 
-	//enable WDT interrupt, 16ms period
-	WDTCSR = _BV(WDIE);
+	//enable WDT in interrupt mode, 128ms period
+	WDTCSR = _BV(WDIE) | _BV(WDP0) | _BV(WDP1);
 	wdt_reset();
 	wdt_ticks = 0;
 
-	set_sleep_mode(SLEEP_MODE_IDLE);
-
-
 	sei();
+
+	uint8_t uvlo_watch = 0;
+
 	while(1) {
 		read_adc();
+
+		if(ADC_RESULTS[2] < V_UVLO) {
+			uvlo_watch += 10;
+		} else if(uvlo_watch > 0) {
+			uvlo_watch--;
+		}
+
+		if(uvlo_watch > 18) {
+			reset_power();
+		}
+
 		if(btn_ready) {
 			poll_buttons();
 		}
-		// poll_buttons();
 	}
 }
 
