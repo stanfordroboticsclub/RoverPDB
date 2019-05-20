@@ -45,10 +45,9 @@ uint16_t ADC_RESULTS[sizeof(ADC_SCANLIST)] = {0};
 volatile bool adc_result_ready = false;
 
 #define MV_PER_LSB 		53.71
-#define V_UVLO 			465 // 25volts
+#define V_OCPTRIP 		521 // 28volts
 #define V_RECOVER 		298 // 16volts 
-#define MAX_DELTA_VBAT 	6	// do not connect batteries more than 322mV apart
-#define OCP_TRIP_DETECT 
+#define MAX_DELTA_VBAT 	6	// do not connect batteries more than 322mV apart  
 
 enum PDBState {READY, LIVE, ESTOP, FAULT};
 PDBState state_pdb;
@@ -297,18 +296,18 @@ int main() {
 
 	sei();
 
-	uint8_t uvlo_watch = 0;
+	uint8_t ocp_watch = 0;
 
 	while(1) {
 		read_adc();
 
-		if(ADC_RESULTS[2] < V_UVLO) {
-			uvlo_watch += 10;
-		} else if(uvlo_watch > 0) {
-			uvlo_watch--;
+		if(ADC_RESULTS[2] < V_OCPTRIP) {
+			ocp_watch += 10;
+		} else if(ocp_watch > 0) {
+			ocp_watch--;
 		}
 
-		if(uvlo_watch > 18) {
+		if(ocp_watch > 18) {
 			reset_power();
 		}
 
