@@ -249,6 +249,7 @@ int main() {
 	update_state(ESTOP);
 
 	// test initial voltage to see if we were previously live
+	// just in case we were killed by a transient on the 5V rail
 	read_adc();
 	if(ADC_RESULTS[2] > V_RECOVER) {
 		update_state(LIVE);
