@@ -105,6 +105,29 @@ void init_adc() {
 	SET(ADCSRA, ADIE);
 }
 
+
+void lp_delay_128(uint8_t periods) {
+	// disable and turn off ADC
+	CLR(ADCSRA, ADEN);
+	SET(PRR, PRADC);
+
+	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+	
+
+	wdt_reset();
+	uint32_t wdt_last = wdt_ticks;
+	for (uint8_t elapsed = 0; elapsed < periods; elapsed++) {
+		while(wdt_ticks <= wdt_last) {
+			sleep_mode();
+		}
+		wdt_last = wdt_ticks;
+	}
+
+	// reenable ADC
+	CLR(PRR, PRADC);
+	init_adc();
+}
+
 // poll buttons over 50ms. this gets called in response to a pin change interrupt,
 // and gives us more confidence in avoiding spurious estop fires
 void poll_buttons() {
@@ -237,23 +260,28 @@ void update_state(PDBState new_state) {
 
 void reset_power() {
 	update_state(ESTOP);
-	_delay_ms(500);
+	lp_delay_128(4);
 	update_state(LIVE);
 }
 
 
 int main() {
-
+	// Critical ASAP initialization.
 	init_io();
-	init_adc();
 	update_state(ESTOP);
+
+	// Setup remaining peripherals.
+	init_adc();
+	
+	// disable all peripherals except Serial1 and ADC
+	PRR = ~(_BV(PRUSART1) | _BV(PRADC));
 
 	// test initial voltage to see if we were previously live
 	// just in case we were killed by a transient on the 5V rail
-	read_adc();
-	if(ADC_RESULTS[2] > V_RECOVER) {
-		update_state(LIVE);
-	}
+	// read_adc();
+	// if(ADC_RESULTS[2] > V_RECOVER) {
+	// 	update_state(LIVE);
+	// }
 
 	// // flash initialization pattern
 	// const uint8_t blink_seconds = 2;
