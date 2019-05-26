@@ -27,6 +27,10 @@ extern "C" {
 #define PORT_GATE		D
 #define PIN_GATE_A 		3
 #define PIN_GATE_B		2
+#define PIN_GATE_COMM 	1
+
+#define PORT_GATE_VCC 	C
+#define PIN_GATE_VCC	5
 
 // pdb controls (active low)
 #define PORT_CONTROLS	C
@@ -74,6 +78,10 @@ void init_io() {
 	// drive gates off
 	SET(CC(DDR, PORT_GATE), PIN_GATE_A);
 	SET(CC(DDR, PORT_GATE), PIN_GATE_B);
+	SET(CC(DDR, PORT_GATE), PIN_GATE_COMM);
+
+	// power up comms system
+	SET(CC(PORT, PORT_GATE), PIN_GATE_COMM);
 
 	// disable input buffer on ADC pins
 	DIDR0 = _BV(PIN_ADC_VBAT_A) + _BV(PIN_ADC_VBAT_B) + _BV(PIN_ADC_VSYS);
@@ -108,7 +116,7 @@ void init_adc() {
 void lp_delay_128(uint8_t periods) {
 	// disable and turn off ADC
 	CLR(ADCSRA, ADEN);
-	SET(PRR, PRADC);
+	SET(PRR0, PRADC);
 
 	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
 	
@@ -123,7 +131,7 @@ void lp_delay_128(uint8_t periods) {
 	}
 
 	// reenable ADC
-	CLR(PRR, PRADC);
+	CLR(PRR0, PRADC);
 	init_adc();
 }
 
@@ -207,24 +215,15 @@ void print_adc() {
 
 void soft_start() {
 
-	const uint8_t dc_period = 10;
-	for(uint8_t t = 1; t < dc_period; t++) {
-		for(uint8_t i = 0; i < 10; i++) {
-			SET(CC(PORT, PORT_GATE), PIN_GATE_A);
-			SET(CC(PORT, PORT_GATE), PIN_GATE_B);
+	for(uint8_t t = 1; t < 10; t++) {
+		SET(CC(PORT, PORT_GATE), PIN_GATE_A);
+		SET(CC(PORT, PORT_GATE), PIN_GATE_B);
 
-			delayMicroseconds(t);
+		delayMicroseconds(t*100);
 
-			// asm volatile("nop\n\t"
-			// "nop\n\t"
-			// "nop\n\t"
-			// "nop\n\t"
-			// ::);
-
-			CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
-			CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
-			_delay_ms(10);
-		}
+		CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
+		CLR(CC(PORT, PORT_GATE), PIN_GATE_A);
+		_delay_us(1000);
 	}
 	SET(CC(PORT, PORT_GATE), PIN_GATE_A);
 	SET(CC(PORT, PORT_GATE), PIN_GATE_B);
@@ -273,7 +272,8 @@ int main() {
 	init_adc();
 	
 	// disable all peripherals except Serial1 and ADC
-	PRR = ~(_BV(PRUSART1) | _BV(PRADC));
+	PRR0 = ~(_BV(PRUSART1) | _BV(PRADC));
+	PRR1 = 0xFF;
 
 	// test initial voltage to see if we were previously live
 	// just in case we were killed by a transient on the 5V rail
