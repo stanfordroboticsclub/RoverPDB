@@ -29,8 +29,8 @@ extern "C" {
 #define PIN_GATE_B		2
 #define PIN_GATE_COMM 	1
 
-#define PORT_GATE_VCC 	C
-#define PIN_GATE_VCC	5
+#define PORT_GVCC 		C
+#define PIN_GVCC_SHDN	5
 
 // pdb controls (active low)
 #define PORT_CONTROLS	C
@@ -49,8 +49,10 @@ uint16_t ADC_RESULTS[sizeof(ADC_SCANLIST)] = {0};
 volatile bool adc_result_ready = false;
 
 #define MV_PER_LSB 		53.71
-#define V_OCPTRIP 		521 // 28volts
+#define A_PER_LSB 		24  // = MVLSB / (~2.2mOhm)
+#define V_OCPCATCH 		521 // 28volts
 #define V_RECOVER 		298 // 16volts 
+#define I_OCPPDB		4   // ~100A
 #define MAX_DELTA_VBAT 	6	// do not connect batteries more than 322mV apart  
 
 enum PDBState {READY, LIVE, ESTOP, FAULT};
@@ -79,6 +81,7 @@ void init_io() {
 	SET(CC(DDR, PORT_GATE), PIN_GATE_A);
 	SET(CC(DDR, PORT_GATE), PIN_GATE_B);
 	SET(CC(DDR, PORT_GATE), PIN_GATE_COMM);
+	SET(CC(DDR, PORT_GVCC), PIN_GVCC_SHDN);
 
 	// power up comms system
 	SET(CC(PORT, PORT_GATE), PIN_GATE_COMM);
@@ -258,7 +261,19 @@ void update_state(PDBState new_state) {
 
 void reset_power() {
 	update_state(ESTOP);
-	lp_delay_128(4);
+	CLR(CC(PORT, PORT_LED_OFF), PIN_LED_OFF);
+
+	// turn off comm power
+	CLR(CC(PORT, PORT_GATE), PIN_GATE_COMM);
+	// turn off vcc rail
+	SET(CC(PORT, PORT_GVCC), PIN_GVCC_SHDN);
+	// wait 256ms in minimum power state
+	lp_delay_128(2);
+
+	// turn on vcc rail, comm power
+	CLR(CC(PORT, PORT_GVCC), PIN_GVCC_SHDN);
+	SET(CC(PORT, PORT_GATE), PIN_GATE_COMM);
+	// turn on system power
 	update_state(LIVE);
 }
 
@@ -272,11 +287,14 @@ int main() {
 	init_adc();
 	
 	// disable all peripherals except Serial1 and ADC
-	PRR0 = ~(_BV(PRUSART1) | _BV(PRADC));
+	PRR0 = ~(
+		// _BV(PRUSART1) | 
+		_BV(PRADC)
+	);
 	PRR1 = 0xFF;
 
 	// test initial voltage to see if we were previously live
-	// just in case we were killed by a transient on the 5V rail
+	// just in case we were killed by a brownout on the 5V rail
 	// read_adc();
 	// if(ADC_RESULTS[2] > V_RECOVER) {
 	// 	update_state(LIVE);
@@ -286,8 +304,8 @@ int main() {
 	// const uint8_t blink_seconds = 2;
 	// blink(2);
 
-	Serial1.begin(115200);
-	Serial1.println("hello");
+	// Serial1.begin(115200);
+	// Serial1.println("hello");
 
 	//enable WDT in interrupt mode, 128ms period
 	WDTCSR = _BV(WDIE) | _BV(WDP0) | _BV(WDP1);
@@ -297,11 +315,13 @@ int main() {
 	sei();
 
 	uint8_t ocp_watch = 0;
+	uint8_t ocp_pdb_count = 0;
 
 	while(1) {
 		read_adc();
 
-		if(ADC_RESULTS[2] < V_OCPTRIP) {
+		// Try to detect and recover from tripped batteries (voltage below 28V)
+		if(ADC_RESULTS[2] < V_OCPCATCH) {
 			ocp_watch += 10;
 		} else if(ocp_watch > 0) {
 			ocp_watch--;
@@ -311,6 +331,23 @@ int main() {
 			reset_power();
 		}
 
+
+		// Limit current per battery to 100A.
+		uint16_t isense_a = ADC_RESULTS[2] - ADC_RESULTS[0];
+		uint16_t isense_b = ADC_RESULTS[2] - ADC_RESULTS[1];
+		if(isense_a > I_OCPPDB || isense_b > I_OCPPDB) {
+			ocp_pdb_count += 10;
+		} else if(ocp_pdb_count > 0) {
+			ocp_pdb_count--;
+		}
+
+
+		if(ocp_pdb_count > 18) {
+			reset_power();
+		}
+
+
+		// Process button events
 		if(btn_ready) {
 			poll_buttons();
 		}
